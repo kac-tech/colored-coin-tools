@@ -16,25 +16,26 @@ function compute_colors(inputs, outputs) {
     var i = 0; //input index
 
     for (var o = 0; o < outputs.length; ++o) {
-	var want_amount = outputs[o].amount;
+	var want_amount = outputs[o].camount;
 
 	if (want_amount > 0) {
             // normal output: make sure we have enough in cur_amount, eating as many inputs as necessary
-	    while ((cur_amount < want_amount) && (i < inputs.length)) {
+	    while ((cur_amount < want_amount) && (i < inputs.length) && (inputs[i].camount >= 0)) {
 
                 if (cur_amount == 0)
                     cur_color = inputs[i].color;
                 else if (cur_color != inputs[i].color)
                     cur_color = COLOR.MIXED;
 
-		cur_amount += inputs[i].amount;
+		cur_amount += inputs[i].camount;
 		++i;
             }
 
             if (cur_amount < want_amount)
                 return false; // transaction itself is invalid
 
-        } else {
+        } else if(want_amount == 0){
+            /* zero-valued outputs not supported yet
             // deal with zero-valued output
             if (cur_amount == 0 && i < inputs.length && inputs[i].amount == 0) {
                 // there is a matching zero-valued input, eat it and use its color
@@ -45,7 +46,12 @@ function compute_colors(inputs, outputs) {
                 // color and thus use COLOR.MIXED
                 cur_color = COLOR.MIXED;
             }
-        }
+            */
+            return false;
+        } else {
+            // want_amount < 0 so it's surely not colored output so break
+            return true;
+	}
 
         // color the output
         outputs[o].color = cur_color;
@@ -199,14 +205,45 @@ function compute_and_validate_colors(inputs, outputs) {
     } else return false;
 }
 
+// carrier constants
+var CARRIER_POWER_BITMASK = 0xF;
+var CARRIER_BASE = 16; // assert(CARRIER_BASE > CARRIER_POWER_BITMASK)
+
+function carrier_preprocess(ios){
+    for(var i=0; i<ios.length; i++){
+        var i_o = ios[i];
+        var amount = i_o.amount;
+        // get masked value
+        var cpower = amount & CARRIER_POWER_BITMASK;
+        // remove masked value from amount
+        amount -= cpower;// or amount = amount & ~CARRIER_POWER_BITMASK
+        // calculate carrier value
+        var carrier = Math.pow(CARRIER_BASE, cpower+1);
+        // remove carrier from amount
+        var camount = amount - carrier;
+        // value can (but not have to) be colored value only if camount>=0
+        if(camount >= 0){
+            i_o.camount = camount;
+            i_o.carrier = carrier;
+            i_o.cpower = cpower;	
+        }else{
+            i_o.camount = -1;
+            i_o.carrier = -1;
+            i_o.cpower = -1;
+        }
+    }
+}
+
 function test_compute_colors() {
-    var inputs = [{color: 1, amount:1},
-                  {color: 1, amount:2},
-                  {color: 2, amount:1},
-                  {color: 0, amount:3}];
-    var outputs = [{color: -2, amount: 3},
-                   {color: -2, amount: 1},
-		   {color: -2, amount: 2}];
+    var inputs = [{color: 1, amount:0x0020}, // camount = 0x10, cpower = 0, carrier = 0x0010
+                  {color: 1, amount:0x0030}, // camount = 0x20, cpower = 0, carrier = 0x0010
+                  {color: 2, amount:0x0111}, // camount = 0x10, cpower = 1, carrier = 0x0100
+                  {color: 0, amount:0x1032}];// camount = 0x30, cpower = 2, carrier = 0x1000
+    var outputs = [{color: -2, amount: 0x0131}, // camount = 0x30, cpower = 1, carrier = 0x0100
+                   {color: -2, amount: 0x0111}, // camount = 0x10, cpower = 1, carrier = 0x0100
+		   {color: -2, amount: 0x0121}];// camount = 0x20, cpower = 1, carrier = 0x0100
+    carrier_preprocess(inputs);
+    carrier_preprocess(outputs);
     var errors =  compute_and_validate_colors(inputs, outputs);
     console.log(outputs);
     return errors;
